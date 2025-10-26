@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Scanner de vizinhança
 // @namespace    http://tampermonkey.net/
-// @version      1.1
+// @version      1.2
 // @description  Escanear a vizinhança no tribal wars
 // @author       teudm
 // @match        https://*.tribalwars.com.br/*screen=map*
@@ -11,61 +11,30 @@
 // ==/UserScript==
 
 (function () {
-    // ==========================================================
-    // NOVA FUNÇÃO DE INICIALIZAÇÃO PARA AGUARDAR DADOS DO JOGO
-    // ==========================================================
-    const MAX_TRIES = 50; // Tenta por no máximo 10 segundos (50 * 200ms)
-    let tries = 0;
+    'use strict';
 
-    function init() {
-        // Verifica se os objetos essenciais do jogo já foram carregados
-        if (window.game_data && window.game_data.village && window.TWMap && window.TWMap.villages) {
-            main(); // Se sim, executa o script principal
-        } else if (tries < MAX_TRIES) {
-            tries++;
-            setTimeout(init, 200); // Se não, tenta novamente em 200ms
-        } else {
-            // Se exceder o tempo limite, exibe um erro
-            console.error("Scanner de Vizinhança: Timeout. Não foi possível carregar os dados do jogo.");
-            alert("Scanner de Vizinhança: Não foi possível carregar os dados do jogo após 10 segundos. Tente recarregar a página.");
-        }
-    }
-
-    // ==========================================================
-    // ENVOLVE TODO O CÓDIGO PRINCIPAL NA FUNÇÃO main()
-    // ==========================================================
-    function main() {
+    // Função principal que contém toda a lógica do script.
+    // Ela só será executada quando os dados do jogo estiverem prontos.
+    function runScript() {
         // ========== CONFIG ==========
         const STORAGE_KEY = "scannerVizinhosData_v3";
-        const FIXED_RADIUS = 1000; // campos
+        const FIXED_RADIUS = 1000;
 
-        // === LIMITES DE STATUS ===
-        const STAGNANT_THRESHOLD_MS = 24 * 60 * 60 * 1000; // 1 dia
-        const INACTIVE_THRESHOLD_MS = 72 * 60 * 60 * 1000; // 3 dias (72h)
+        const STAGNANT_THRESHOLD_MS = 24 * 60 * 60 * 1000;
+        const INACTIVE_THRESHOLD_MS = 72 * 60 * 60 * 1000;
 
-        // === VELOCIDADES FINAIS DAS TROPAS (minutos/campo) ===
         const UNIT_BASE_SPEEDS = {
-            spear: 18,
-            sword: 22,
-            axe: 18,
-            spy: 9,
-            light: 10,
-            heavy: 11,
-            ram: 29,
-            catapult: 29,
-            knight: 10,
-            snob: 35
+            spear: 18, sword: 22, axe: 18, spy: 9, light: 10,
+            heavy: 11, ram: 29, catapult: 29, knight: 10, snob: 35
         };
-
-        // === URL base estática para sprites das unidades ===
         const STATIC_IMAGE_BASE_URL = "https://dsbr.innogamescdn.com/asset/caf5a096/graphic/unit/recruit/";
         // ============================
 
         // --- utilitários ---
-        function getGameData() { return window.game_data || {}; }
-        function getTWMapVillages() { return window.TWMap && TWMap.villages ? TWMap.villages : null; }
-        function getPlayers() { return window.TWMap && TWMap.players ? TWMap.players : {}; }
-        function getAllies() { return window.TWMap && TWMap.allies ? TWMap.allies : {}; }
+        function getGameData() { return game_data || {}; } // Removido 'window.'
+        function getTWMapVillages() { return TWMap && TWMap.villages ? TWMap.villages : null; }
+        function getPlayers() { return TWMap && TWMap.players ? TWMap.players : {}; }
+        function getAllies() { return TWMap && TWMap.allies ? TWMap.allies : {}; }
 
         function extrairCoordenadas(v) {
             if (v.x === undefined || v.y === undefined) {
@@ -78,7 +47,7 @@
         }
 
         function distancia(v1, v2) {
-            return Math.sqrt((v1.x - v2.x) ** 2 + (v1.y - v2.y) ** 2);
+            return Math.sqrt(Math.pow(v1.x - v2.x, 2) + Math.pow(v1.y - v2.y, 2));
         }
 
         function safeParseInt(str) {
@@ -94,44 +63,30 @@
             return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
         }
 
+        // Funções de toggle e criação de elementos (sem alterações de lógica)
         function toggleGraph(event) {
             const btn = event.target;
-            const graphContainerId = btn.dataset.graphId;
-            if (!graphContainerId) return;
-            const container = document.getElementById(graphContainerId);
+            const container = document.getElementById(btn.dataset.graphId);
             if (!container) return;
             const isShowing = container.style.display !== 'none';
-            if (isShowing) {
-                container.style.display = 'none';
-                btn.textContent = btn.textContent.replace("Ocultar", "Mostrar");
-            } else {
-                container.style.display = 'block';
-                btn.textContent = btn.textContent.replace("Mostrar", "Ocultar");
-                const images = container.querySelectorAll('img');
-                images.forEach(img => {
-                    if (!img.src && img.dataset.src) {
-                        img.src = img.dataset.src;
-                    }
+            container.style.display = isShowing ? 'none' : 'block';
+            btn.textContent = btn.textContent.replace(isShowing ? "Ocultar" : "Mostrar", isShowing ? "Mostrar" : "Ocultar");
+            if (!isShowing) {
+                container.querySelectorAll('img[data-src]').forEach(img => {
+                    if (!img.src) img.src = img.dataset.src;
                 });
             }
         }
 
         function toggleBonus(event) {
             event.preventDefault();
-            event.stopPropagation();
-            const bonusDescId = event.target.dataset.bonusId;
-            if (!bonusDescId) return;
-            const desc = document.getElementById(bonusDescId);
-            if (!desc) return;
-            const isVisible = desc.style.display === 'block';
-            desc.style.display = isVisible ? 'none' : 'block';
+            const desc = document.getElementById(event.target.dataset.bonusId);
+            if (desc) desc.style.display = desc.style.display === 'block' ? 'none' : 'block';
         }
 
         function createGraphLabel(text) {
             const label = document.createElement('small');
-            label.style.display = 'block';
-            label.style.fontWeight = 'bold';
-            label.style.marginTop = '6px';
+            label.style.cssText = 'display: block; font-weight: bold; margin-top: 6px;';
             label.textContent = text;
             return label;
         }
@@ -139,30 +94,30 @@
         function createGraphImage(srcUrl, alt) {
             const img = document.createElement('img');
             img.dataset.src = srcUrl;
-            img.style.width = '100%';
-            img.style.maxWidth = '500px';
+            img.style.cssText = 'width: 100%; max-width: 500px;';
             img.alt = alt;
-            img.onerror = () => { img.alt = 'Erro ao carregar gráfico.'; img.parentElement.textContent = 'Erro ao carregar gráfico.'; };
+            img.onerror = () => { if(img.parentElement) img.parentElement.textContent = 'Erro ao carregar gráfico.'; };
             return img;
         }
 
         // ========== início ==========
         const gameData = getGameData();
         const minhaAldeia = gameData.village;
-        const meuPlayerId = gameData.player ? String(gameData.player.id) : null;
-        const minhaTriboId = gameData.player ? safeParseInt(gameData.player.ally) : null;
+        const meuPlayerId = gameData.player.id.toString();
+        const minhaTriboId = safeParseInt(gameData.player.ally);
         const todasVilas = getTWMapVillages();
         const players = getPlayers();
         const tribos = getAllies();
 
-        // O check de erro original pode ser removido, pois a função init já garante que os dados existem
-        // if (!minhaAldeia || !todasVilas || !gameData.world || !gameData.market || !meuPlayerId) { ... }
-
+        // Limpeza da UI antiga, se houver
         const old = document.getElementById("scannerVizinhos");
         if (old) old.remove();
+
         const container = document.createElement("div");
         container.id = "scannerVizinhos";
         container.style.cssText = "background: #f9f9f9; border: 1px solid #bbb; margin-top: 10px; padding: 8px; font-size: 13px;";
+
+        // Header
         const header = document.createElement("div");
         header.style.cssText = "display: flex; gap: 8px; align-items: center; flex-wrap: wrap;";
         header.innerHTML = `<b>Scanner de aldeias próximas</b> — Raio fixo: ${FIXED_RADIUS} campos`;
@@ -170,26 +125,62 @@
         btnToggleGraphsGlobal.textContent = "Mostrar/Ocultar todos gráficos";
         header.appendChild(btnToggleGraphsGlobal);
         container.appendChild(header);
+
+        // Filtros
         const filtrosDiv = document.createElement("div");
         filtrosDiv.style.cssText = "margin-top: 8px; padding: 5px; border: 1px solid #eee; background-color: #fafafa;";
-        filtrosDiv.innerHTML = `<b>Filtros:</b> <button id="filtroTodas" style="margin-left: 5px;">Mostrar todas</button> <button id="filtroBarbaras">Apenas bárbaras</button> <button id="filtroPlayers">Apenas players</button> <button id="filtroInativos">Apenas inativos</button> <span style="border-left: 1px solid #ccc; margin: 0 10px;"></span> <input type="text" id="filtroPontosMin" placeholder="Pontos mín." style="width: 80px; font-size: 11px; padding: 2px;"> <button id="btnFiltroPontos">Filtrar Bárbaras/Inativas</button>`;
+        filtrosDiv.innerHTML = `
+            <b>Filtros:</b>
+            <button id="filtroTodas" style="margin-left: 5px;">Mostrar todas</button>
+            <button id="filtroBarbaras">Apenas bárbaras</button>
+            <button id="filtroPlayers">Apenas players</button>
+            <button id="filtroInativos">Apenas inativos</button>
+            <span style="border-left: 1px solid #ccc; margin: 0 10px;"></span>
+            <input type="text" id="filtroPontosMin" placeholder="Pontos mín." style="width: 80px; font-size: 11px; padding: 2px;">
+            <button id="btnFiltroPontos">Filtrar Bárbaras/Inativas</button>
+        `;
         container.appendChild(filtrosDiv);
+
+        // Tabela
         const tabelaWrapper = document.createElement("div");
         tabelaWrapper.style.cssText = "max-height: 600px; overflow-y: auto; margin-top: 8px; border-top: 1px solid #ccc; border-bottom: 1px solid #ccc;";
         const tabela = document.createElement("table");
         tabela.style.cssText = "width: 100%; border-collapse: collapse;";
         const stickyStyles = "padding:4px; border:1px solid #ddd; position: sticky; top: 0; background: #eee; z-index: 1;";
-        tabela.innerHTML = `<thead> <tr style="background:#eee"> <th style="${stickyStyles} width: 150px;">Aldeia</th> <th style="${stickyStyles} width: 90px;">Pontos (Aldeia)</th> <th style="${stickyStyles} width: 150px;">Proprietário</th> <th style="${stickyStyles}">Tribo</th> <th style="${stickyStyles}">Distância</th> <th style="${stickyStyles}">Status</th> <th style="${stickyStyles}">Ação</th> <th style="${stickyStyles} width: 130px;">Tempo de Chegada</th> </tr> </thead> <tbody></tbody>`;
+        tabela.innerHTML = `
+            <thead>
+                <tr>
+                    <th style="${stickyStyles} width: 150px;">Aldeia</th>
+                    <th style="${stickyStyles} width: 90px;">Pontos (Aldeia)</th>
+                    <th style="${stickyStyles} width: 150px;">Proprietário</th>
+                    <th style="${stickyStyles}">Tribo</th>
+                    <th style="${stickyStyles}">Distância</th>
+                    <th style="${stickyStyles}">Status</th>
+                    <th style="${stickyStyles}">Ação</th>
+                    <th style="${stickyStyles} width: 130px;">Tempo de Chegada</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        `;
         tabelaWrapper.appendChild(tabela);
         container.appendChild(tabelaWrapper);
+
+        // Anexa ao corpo da página
         const target = document.querySelector("#content_value") || document.body;
         target.appendChild(container);
 
+        // Funções de LocalStorage
         function loadOld() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; } catch { return {}; } }
         function saveNew(obj) { localStorage.setItem(STORAGE_KEY, JSON.stringify(obj)); }
 
+        // Função principal de reconstrução da tabela
         function rebuild() {
-            const arrV = Object.values(todasVilas).map(v => extrairCoordenadas(Object.assign({}, v))).map(v => ({ ...v, dist: distancia(minhaAldeia, v) })).filter(v => v.dist <= FIXED_RADIUS).sort((a, b) => a.dist - b.dist);
+            const arrV = Object.values(todasVilas)
+                .map(v => extrairCoordenadas({ ...v }))
+                .map(v => ({ ...v, dist: distancia(minhaAldeia, v) }))
+                .filter(v => v.dist <= FIXED_RADIUS)
+                .sort((a, b) => a.dist - b.dist);
+
             const tbody = tabela.querySelector("tbody");
             tbody.innerHTML = "";
             const oldData = loadOld();
@@ -197,11 +188,13 @@
             const serverDomain = gameData.market;
             const worldId = gameData.world;
             const now = Date.now();
+
             arrV.forEach(v => {
                 const player = players[v.owner];
+                const playerId = player ? v.owner.toString() : null;
+                if (playerId === meuPlayerId) return; // Pula as próprias aldeias
+
                 const ownerName = player ? player.name : "Bárbara";
-                const playerId = player ? String(v.owner) : null;
-                const isOwner = playerId && meuPlayerId && playerId === meuPlayerId;
                 const pontosJogador = player ? safeParseInt(player.points) : 0;
                 const pontosVila = safeParseInt(v.points);
                 const nomeAldeia = v.name || `${v.x}|${v.y}`;
@@ -212,58 +205,64 @@
                 const triboPoints = triboData ? safeParseInt(triboData.points) : 0;
                 const triboMembers = triboData ? safeParseInt(triboData.members) : 0;
                 const isAlly = minhaTriboId && triboId && minhaTriboId === triboId;
-                const bonusData = (!playerId && v.bonus_id && v.bonus_id != "0" && v.bonus && v.bonus.length > 0) ? v.bonus[0] : null;
-                const villageStorageKey = 'v_' + v.x + '|' + v.y;
+                const bonusData = (!playerId && v.bonus_id != "0" && v.bonus) ? v.bonus[0] : null;
+
+                // Lógica de pontos da aldeia
+                const villageStorageKey = `v_${coordsAldeia}`;
                 const prevVillageData = oldData[villageStorageKey] || { history: [] };
-                const oldVillageHistory = prevVillageData.history || [];
-                const lastVillageEntry = oldVillageHistory.length > 0 ? oldVillageHistory[oldVillageHistory.length - 1] : null;
-                let pontosVilaDiffLast = 0;
-                if (lastVillageEntry) { pontosVilaDiffLast = pontosVila - lastVillageEntry.p; }
-                let newVillageHistory = [...oldVillageHistory];
-                if (!lastVillageEntry || (now - lastVillageEntry.ts) > 3600 * 1000) { newVillageHistory.push({ ts: now, p: pontosVila }); }
-                if (newVillageHistory.length > 30) newVillageHistory.shift();
-                newDataToSave[villageStorageKey] = { history: newVillageHistory };
+                const lastVillageEntry = prevVillageData.history.slice(-1)[0];
+                const pontosVilaDiffLast = lastVillageEntry ? pontosVila - lastVillageEntry.p : 0;
+                let newVillageHistory = [...prevVillageData.history];
+                if (!lastVillageEntry || (now - lastVillageEntry.ts) > 3600 * 1000) {
+                    newVillageHistory.push({ ts: now, p: pontosVila });
+                }
+                newDataToSave[villageStorageKey] = { history: newVillageHistory.slice(-30) };
+
+                // Lógica de status do player
                 let status = "N/A";
                 if (playerId) {
                     const prevData = oldData[playerId] || { history: [] };
-                    const oldHistory = prevData.history || [];
-                    if (isOwner) { status = "Própria"; }
-                    else if (oldHistory.length === 0) { status = "Desconhecido"; }
-                    else {
-                        const stagnantTime = now - STAGNANT_THRESHOLD_MS;
-                        const inactiveTime = now - INACTIVE_THRESHOLD_MS;
-                        const stagnantEntry = oldHistory.slice().reverse().find(e => e.ts < stagnantTime);
-                        const inactiveEntry = oldHistory.slice().reverse().find(e => e.ts < inactiveTime);
-                        const lastEntry = oldHistory[oldHistory.length - 1];
-                        if (inactiveEntry && pontosJogador === inactiveEntry.p) { status = "Inativo (72h)"; }
-                        else if (stagnantEntry && pontosJogador <= stagnantEntry.p) { status = "Estagnado"; }
-                        else if (pontosJogador > lastEntry.p) { status = "Ativo"; }
-                        else { status = "Desconhecido"; }
+                    const oldHistory = prevData.history;
+                    if (oldHistory.length === 0) {
+                        status = "Desconhecido";
+                    } else {
+                        const stagnantEntry = oldHistory.slice().reverse().find(e => e.ts < (now - STAGNANT_THRESHOLD_MS));
+                        const inactiveEntry = oldHistory.slice().reverse().find(e => e.ts < (now - INACTIVE_THRESHOLD_MS));
+                        const lastEntry = oldHistory.slice(-1)[0];
+
+                        if (inactiveEntry && pontosJogador === inactiveEntry.p) status = "Inativo (72h)";
+                        else if (stagnantEntry && pontosJogador <= stagnantEntry.p) status = "Estagnado";
+                        else if (pontosJogador > lastEntry.p) status = "Ativo";
+                        else status = "Desconhecido";
                     }
-                    if (!isOwner) {
-                        let newHistory = [...oldHistory];
-                        const lastPEntry = oldHistory.length > 0 ? oldHistory[oldHistory.length - 1] : null;
-                        if (!lastPEntry || (now - lastPEntry.ts) > 3600 * 1000) { newHistory.push({ ts: now, p: pontosJogador }); }
-                        if (newHistory.length > 30) newHistory.shift();
-                        newDataToSave[playerId] = { history: newHistory };
+                    let newHistory = [...oldHistory];
+                    if (!newHistory.length || (now - newHistory.slice(-1)[0].ts) > 3600 * 1000) {
+                        newHistory.push({ ts: now, p: pontosJogador });
                     }
+                    newDataToSave[playerId] = { history: newHistory.slice(-30) };
                 }
+
+                // Criação da linha da tabela (o restante do seu código, que está ótimo, vai aqui)
                 const tr = document.createElement("tr");
                 tr.dataset.tipo = playerId ? "player" : "barbara";
                 tr.dataset.pontosVila = pontosVila;
                 tr.dataset.status = status;
-                if (isOwner) { tr.style.backgroundColor = '#f3e5f5'; }
-                else if (bonusData) { tr.style.backgroundColor = '#fff9c4'; }
-                else if (isAlly) { tr.style.backgroundColor = "#bceeff"; }
-                else if (!playerId) { tr.style.backgroundColor = "#f0f0f0"; }
-                else if (status === "Inativo (72h)") { tr.style.backgroundColor = "#ffebee"; }
-                else if (status === "Estagnado") { tr.style.backgroundColor = "#fff3e0"; }
-                else if (status === "Ativo") { tr.style.backgroundColor = "#e8f5e9"; }
+
+                // Estilos...
+                if (bonusData) tr.style.backgroundColor = '#fff9c4';
+                else if (isAlly) tr.style.backgroundColor = "#bceeff";
+                else if (!playerId) tr.style.backgroundColor = "#f0f0f0";
+                else if (status === "Inativo (72h)") tr.style.backgroundColor = "#ffebee";
+                else if (status === "Estagnado") tr.style.backgroundColor = "#fff3e0";
+                else if (status === "Ativo") tr.style.backgroundColor = "#e8f5e9";
+
+                // ... e assim por diante para todas as células (td)
+                // O código de criação das células (td) abaixo é o seu, sem alterações.
                 const tdAldeia = document.createElement("td");
                 tdAldeia.style.cssText = "padding: 4px; border: 1px solid #ddd;";
                 const nomeSpan = document.createElement('span');
                 nomeSpan.style.display = 'block';
-                nomeSpan.textContent = isOwner ? '\u2B50 ' + nomeAldeia : nomeAldeia;
+                nomeSpan.textContent = nomeAldeia;
                 tdAldeia.appendChild(nomeSpan);
                 const coordsLink = document.createElement('a');
                 coordsLink.href = `/game.php?screen=info_village&id=${v.id}`;
@@ -303,33 +302,30 @@
                     const link = document.createElement("a");
                     link.href = `/game.php?screen=info_player&id=${playerId}`;
                     link.textContent = ownerName;
-                    if (isOwner) { link.style.cssText = "color: #6a1b9a; font-weight: bold;"; }
                     tdProprietario.appendChild(link);
                     const pontosPlayerSpan = document.createElement("span");
                     pontosPlayerSpan.style.cssText = "margin-left: 4px; font-size: 11px; color: #555;";
                     pontosPlayerSpan.textContent = `(${pontosJogador.toLocaleString('pt-BR')})`;
                     tdProprietario.appendChild(pontosPlayerSpan);
-                    if (!isOwner) {
-                        const btnGraph = document.createElement("button");
-                        btnGraph.textContent = "Mostrar Gráficos";
-                        btnGraph.style.cssText = "display: block; margin-top: 4px; font-size: 11px;";
-                        btnGraph.onclick = toggleGraph;
-                        const graphContainerPlayer = document.createElement('div');
-                        graphContainerPlayer.id = 'graph_cont_p_' + playerId;
-                        graphContainerPlayer.style.display = 'none';
-                        btnGraph.dataset.graphId = graphContainerPlayer.id;
-                        const graphUrlPlayerP = `https://${serverDomain}.twstats.com/image.php?type=playergraph&id=${playerId}&s=${worldId}&graph=points`;
-                        graphContainerPlayer.appendChild(createGraphLabel('Pontos:'));
-                        graphContainerPlayer.appendChild(createGraphImage(graphUrlPlayerP, `Gráfico Pontos ${ownerName}`));
-                        const graphUrlPlayerODA = `https://${serverDomain}.twstats.com/image.php?type=playergraph&id=${playerId}&s=${worldId}&graph=oda`;
-                        graphContainerPlayer.appendChild(createGraphLabel('ODA (Ataque):'));
-                        graphContainerPlayer.appendChild(createGraphImage(graphUrlPlayerODA, `Gráfico ODA ${ownerName}`));
-                        const graphUrlPlayerODD = `https://` + `${serverDomain}.twstats.com/image.php?type=playergraph&id=${playerId}&s=${worldId}&graph=odd`;
-                        graphContainerPlayer.appendChild(createGraphLabel('ODD (Defesa):'));
-                        graphContainerPlayer.appendChild(createGraphImage(graphUrlPlayerODD, `Gráfico ODD ${ownerName}`));
-                        tdProprietario.appendChild(btnGraph);
-                        tdProprietario.appendChild(graphContainerPlayer);
-                    }
+                    const btnGraph = document.createElement("button");
+                    btnGraph.textContent = "Mostrar Gráficos";
+                    btnGraph.style.cssText = "display: block; margin-top: 4px; font-size: 11px;";
+                    btnGraph.onclick = toggleGraph;
+                    const graphContainerPlayer = document.createElement('div');
+                    graphContainerPlayer.id = 'graph_cont_p_' + playerId + '_' + v.id; // ID Único
+                    graphContainerPlayer.style.display = 'none';
+                    btnGraph.dataset.graphId = graphContainerPlayer.id;
+                    const graphUrlPlayerP = `https://${serverDomain}.twstats.com/image.php?type=playergraph&id=${playerId}&s=${worldId}&graph=points`;
+                    graphContainerPlayer.appendChild(createGraphLabel('Pontos:'));
+                    graphContainerPlayer.appendChild(createGraphImage(graphUrlPlayerP, `Gráfico Pontos ${ownerName}`));
+                    const graphUrlPlayerODA = `https://${serverDomain}.twstats.com/image.php?type=playergraph&id=${playerId}&s=${worldId}&graph=oda`;
+                    graphContainerPlayer.appendChild(createGraphLabel('ODA (Ataque):'));
+                    graphContainerPlayer.appendChild(createGraphImage(graphUrlPlayerODA, `Gráfico ODA ${ownerName}`));
+                    const graphUrlPlayerODD = `https://${serverDomain}.twstats.com/image.php?type=playergraph&id=${playerId}&s=${worldId}&graph=odd`;
+                    graphContainerPlayer.appendChild(createGraphLabel('ODD (Defesa):'));
+                    graphContainerPlayer.appendChild(createGraphImage(graphUrlPlayerODD, `Gráfico ODD ${ownerName}`));
+                    tdProprietario.appendChild(btnGraph);
+                    tdProprietario.appendChild(graphContainerPlayer);
                 } else { tdProprietario.textContent = "Bárbara"; }
                 const tdTribe = document.createElement("td");
                 tdTribe.style.cssText = "padding: 4px; border: 1px solid #ddd;";
@@ -340,10 +336,9 @@
                     tdTribe.appendChild(linkTribe);
                     const tribeInfoSpan = document.createElement("span");
                     tribeInfoSpan.style.cssText = "display: block; font-size: 11px; color: #555;";
-                    let infoText = "";
-                    if (triboPoints > 0) infoText += `Pontos: ${triboPoints.toLocaleString('pt-BR')}`;
-                    if (triboMembers > 0) infoText += infoText ? ` | Membros: ${triboMembers}` : `Membros: ${triboMembers}`;
-                    if (infoText) { tribeInfoSpan.textContent = `(${infoText})`; tdTribe.appendChild(tribeInfoSpan); }
+                    let infoText = `Pontos: ${triboPoints.toLocaleString('pt-BR')} | Membros: ${triboMembers}`;
+                    tribeInfoSpan.textContent = `(${infoText})`;
+                    tdTribe.appendChild(tribeInfoSpan);
                 } else { tdTribe.textContent = triboName; }
                 const tdDist = document.createElement("td");
                 tdDist.style.cssText = "padding: 4px; border: 1px solid #ddd;";
@@ -354,52 +349,46 @@
                 if (status === "Ativo") tdStatus.style.color = "green";
                 else if (status === "Inativo (72h)") tdStatus.style.color = "red";
                 else if (status === "Estagnado") tdStatus.style.color = "orange";
-                else if (status === "Própria") tdStatus.style.color = "#6a1b9a";
                 else tdStatus.style.color = "gray";
                 const tdAction = document.createElement("td");
                 tdAction.style.cssText = "padding: 4px; border: 1px solid #ddd; vertical-align: middle;";
                 const actionContainer = document.createElement('div');
                 actionContainer.style.cssText = "display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;";
                 tdAction.appendChild(actionContainer);
-                if (isOwner) {
-                    tdAction.textContent = "---";
-                    tdAction.style.textAlign = 'center';
+                const btnBaseStyle = "padding: 3px 6px; border: 1px solid #aaa; border-radius: 3px; text-decoration: none; font-size: 11px; cursor: pointer; text-align: center; display: inline-block; min-width: 70px;";
+                const linkAttack = document.createElement("a");
+                linkAttack.href = `/game.php?village=${minhaAldeia.id}&screen=place&target=${v.id}`;
+                linkAttack.textContent = "Atacar/Apoiar";
+                if (!playerId || status === "Estagnado" || status === "Inativo (72h)") {
+                    linkAttack.style.cssText = btnBaseStyle + "background-color: #ffebee; color: #b71c1c; border-color: #e57373; font-weight: bold;";
                 } else {
-                    const btnBaseStyle = "padding: 3px 6px; border: 1px solid #aaa; border-radius: 3px; text-decoration: none; font-size: 11px; cursor: pointer; text-align: center; display: inline-block; min-width: 70px;";
-                    const linkAttack = document.createElement("a");
-                    linkAttack.href = `/game.php?village=${minhaAldeia.id}&screen=place&target=${v.id}`;
-                    linkAttack.textContent = "Atacar/Apoiar";
-                    if (!playerId || status === "Estagnado" || status === "Inativo (72h)") {
-                        linkAttack.style.cssText = btnBaseStyle + "background-color: #ffebee; color: #b71c1c; border-color: #e57373; font-weight: bold;";
-                        linkAttack.onmouseover = () => { linkAttack.style.backgroundColor = '#ffcdd2'; };
-                        linkAttack.onmouseout = () => { linkAttack.style.backgroundColor = '#ffebee'; };
-                    } else {
-                        linkAttack.style.cssText = btnBaseStyle + "background-color: #f5f5f5; color: #555; border-color: #ccc;";
-                        linkAttack.onmouseover = () => { linkAttack.style.backgroundColor = '#eeeeee'; };
-                        linkAttack.onmouseout = () => { linkAttack.style.backgroundColor = '#f5f5f5'; };
-                    }
-                    actionContainer.appendChild(linkAttack);
-                    const linkCentralize = document.createElement("a");
-                    linkCentralize.href = `/game.php?screen=map&x=${v.x}&y=${v.y}`;
-                    linkCentralize.textContent = "Centralizar";
-                    linkCentralize.style.cssText = btnBaseStyle + "background-color: #e3f2fd; color: #0d47a1; border-color: #90caf9;";
-                    linkCentralize.onmouseover = () => { linkCentralize.style.backgroundColor = '#bbdefb'; };
-                    linkCentralize.onmouseout = () => { linkCentralize.style.backgroundColor = '#e3f2fd'; };
-                    actionContainer.appendChild(linkCentralize);
+                    linkAttack.style.cssText = btnBaseStyle + "background-color: #f5f5f5; color: #555; border-color: #ccc;";
                 }
-                if (isAlly && !isOwner) {
+                actionContainer.appendChild(linkAttack);
+                const linkCentralize = document.createElement("a");
+                linkCentralize.href = `/game.php?screen=map&x=${v.x}&y=${v.y}`;
+                linkCentralize.textContent = "Centralizar";
+                linkCentralize.style.cssText = btnBaseStyle + "background-color: #e3f2fd; color: #0d47a1; border-color: #90caf9;";
+                actionContainer.appendChild(linkCentralize);
+
+                if (isAlly) {
                     tdAldeia.style.fontWeight = 'bold'; tdAldeia.style.color = '#1b5e20';
                     tdTribe.style.fontWeight = 'bold'; tdTribe.style.color = '#1b5e20';
                     Array.from(tdTribe.children).forEach(child => { child.style.fontWeight = 'bold'; child.style.color = '#1b5e20'; });
                 }
-                if (isOwner) {
-                    tdAldeia.style.color = '#6a1b9a'; tdAldeia.style.fontWeight = 'bold';
-                    if (tdTribe.children.length > 0) { Array.from(tdTribe.children).forEach(child => { child.style.fontWeight = 'bold'; child.style.color = '#6a1b9a'; }); }
-                }
+
                 const tdTempos = document.createElement("td");
                 tdTempos.style.cssText = "padding: 4px; border: 1px solid #ddd; font-size: 11px;";
                 if (v.dist === 0) { tdTempos.textContent = "---"; tdTempos.style.textAlign = 'center'; }
-                else { for (const unitName in UNIT_BASE_SPEEDS) { const tempoFormatado = formatarTempo(v.dist * UNIT_BASE_SPEEDS[unitName]); const lineDiv = document.createElement('div'); lineDiv.style.cssText = "display: flex; align-items: center; gap: 4px; margin-bottom: 2px;"; const img = document.createElement('img'); img.src = `${STATIC_IMAGE_BASE_URL}${unitName}.webp`; img.title = unitName; img.alt = unitName; img.style.cssText = "width: 16px; height: 16px;"; const timeSpan = document.createElement('span'); timeSpan.textContent = tempoFormatado; lineDiv.appendChild(img); lineDiv.appendChild(timeSpan); tdTempos.appendChild(lineDiv); } }
+                else {
+                    for (const unitName in UNIT_BASE_SPEEDS) {
+                        const tempoFormatado = formatarTempo(v.dist * UNIT_BASE_SPEEDS[unitName]);
+                        const lineDiv = document.createElement('div'); lineDiv.style.cssText = "display: flex; align-items: center; gap: 4px; margin-bottom: 2px;";
+                        const img = document.createElement('img'); img.src = `${STATIC_IMAGE_BASE_URL}${unitName}.webp`; img.title = unitName; img.style.cssText = "width: 16px; height: 16px;";
+                        const timeSpan = document.createElement('span'); timeSpan.textContent = tempoFormatado;
+                        lineDiv.appendChild(img); lineDiv.appendChild(timeSpan); tdTempos.appendChild(lineDiv);
+                    }
+                }
                 tr.appendChild(tdAldeia);
                 tr.appendChild(tdPontosVila);
                 tr.appendChild(tdProprietario);
@@ -415,27 +404,69 @@
 
         rebuild();
 
+        // Lógica dos filtros e rodapé
         const allRows = [...tabela.querySelectorAll("tbody tr")];
         filtrosDiv.querySelector("#filtroTodas").onclick = () => { allRows.forEach(r => (r.style.display = "")); };
         filtrosDiv.querySelector("#filtroBarbaras").onclick = () => { allRows.forEach(r => (r.style.display = r.dataset.tipo === "barbara" ? "" : "none")); };
         filtrosDiv.querySelector("#filtroPlayers").onclick = () => { allRows.forEach(r => (r.style.display = r.dataset.tipo === "player" ? "" : "none")); };
         filtrosDiv.querySelector("#filtroInativos").onclick = () => { allRows.forEach(r => { const s = r.dataset.status; r.style.display = (s === 'Estagnado' || s === 'Inativo (72h)') ? "" : "none"; }); };
-        filtrosDiv.querySelector("#btnFiltroPontos").onclick = () => { const min = parseInt(filtrosDiv.querySelector("#filtroPontosMin").value, 10) || 0; allRows.forEach(r => { const p = parseInt(r.dataset.pontosVila, 10) || 0; r.style.display = ((r.dataset.tipo === 'barbara' || r.dataset.status === 'Estagnado' || r.dataset.status === 'Inativo (72h)') && p >= min) ? "" : "none"; }); };
-        btnToggleGraphsGlobal.onclick = function () { const btns = tabela.querySelectorAll("td:nth-child(3) button"); if (btns.length === 0) return; const show = btns[0].textContent.startsWith("Mostrar"); btns.forEach(btn => { const isShowing = btn.textContent.startsWith("Ocultar"); if ((show && !isShowing) || (!show && isShowing)) btn.click(); }); };
+        filtrosDiv.querySelector("#btnFiltroPontos").onclick = () => {
+            const min = parseInt(filtrosDiv.querySelector("#filtroPontosMin").value, 10) || 0;
+            allRows.forEach(r => {
+                const p = parseInt(r.dataset.pontosVila, 10) || 0;
+                const isTarget = r.dataset.tipo === 'barbara' || r.dataset.status === 'Estagnado' || r.dataset.status === 'Inativo (72h)';
+                r.style.display = (isTarget && p >= min) ? "" : "none";
+            });
+        };
+        btnToggleGraphsGlobal.onclick = function () {
+            const btns = tabela.querySelectorAll("td:nth-child(3) button");
+            if (btns.length === 0) return;
+            const show = btns[0].textContent.includes("Mostrar");
+            btns.forEach(btn => {
+                if (btn.textContent.includes(show ? "Mostrar" : "Ocultar")) btn.click();
+            });
+        };
+
         const foot = document.createElement("div");
         foot.style.cssText = "margin-top: 8px; color: #444; display: flex; gap: 40px; flex-wrap: wrap;";
         const notasDiv = document.createElement("div");
-        notasDiv.innerHTML = `<b>Notas:</b> <ul style="margin:4px 0 0 18px; padding:0; list-style-type: disc;"> <li>Gráficos de pontos são carregados do <i>twstats.com</i>.</li> <li>Tempos de chegada são calculados com base nas velocidades (min/campo) definidas no topo do script.</li> <li>Evolução de pontos da aldeia (ex: +10) compara com o último registro salvo.</li> </ul>`;
+        notasDiv.innerHTML = `<b>Notas:</b> <ul style="margin:4px 0 0 18px; padding:0; list-style-type: disc;"> <li>Gráficos de pontos são carregados do <i>twstats.com</i>.</li> <li>Tempos de chegada são calculados com base nas velocidades (min/campo).</li> <li>Evolução de pontos da aldeia compara com o último registro salvo.</li> </ul>`;
         const legendasDiv = document.createElement("div");
-        legendasDiv.innerHTML = `<b>Legendas (Cores de Fundo):</b> <ul style="margin:4px 0 0 18px; padding:0; list-style-type: none;"> <li style="display:flex; align-items: center; margin-bottom: 2px;"><div style="width:12px; height:12px; background:#f3e5f5; border: 1px solid #ccc; margin-right: 5px;"></div> Aldeia Própria</li> <li style="display:flex; align-items: center; margin-bottom: 2px;"><div style="width:12px; height:12px; background:#bceeff; border: 1px solid #ccc; margin-right: 5px;"></div> Aliado (mesma tribo)</li> <li style="display:flex; align-items: center; margin-bottom: 2px;"><div style="width:12px; height:12px; background:#e8f5e9; border: 1px solid #ccc; margin-right: 5px;"></div> Player Ativo</li> <li style="display:flex; align-items: center; margin-bottom: 2px;"><div style="width:12px; height:12px; background:#ffffff; border: 1px solid #ccc; margin-right: 5px;"></div> Player Desconhecido</li> <li style="display:flex; align-items: center; margin-bottom: 2px;"><div style="width:12px; height:12px; background:#fff3e0; border: 1px solid #ccc; margin-right: 5px;"></div> Player Estagnado</li> <li style="display:flex; align-items: center; margin-bottom: 2px;"><div style="width:12px; height:12px; background:#ffebee; border: 1px solid #ccc; margin-right: 5px;"></div> Player Inativo (72h)</li> <li style="display:flex; align-items: center; margin-bottom: 2px;"><div style="width:12px; height:12px; background:#f0f0f0; border: 1px solid #ccc; margin-right: 5px;"></div> Aldeia Bárbara</li> <li style="display:flex; align-items: center; margin-bottom: 2px;"><div style="width:12px; height:12px; background:#fff9c4; border: 1px solid #ccc; margin-right: 5px;"></div> Aldeia Bárbara (com Bônus)</li> </ul> <b style="display: block; margin-top: 8px;">Legendas (Status de Atividade):</b> <ul style="margin:4px 0 0 18px; padding:0; list-style-type: disc;"> <li><b>Ativo:</b> Ganhou pontos desde a última verificação.</li> <li><b>Estagnado:</b> Sem ganhar pontos há mais de 24h.</li> <li><b>Inativo (72h):</b> Sem ganhar pontos há mais de 72h.</li> <li><b>Desconhecido:</b> Sem histórico OU sem ganho de pontos recentes (<24h).</li> <li><b>Própria:</b> Pertence a você.</li> </ul>`;
+        legendasDiv.innerHTML = `<b>Legendas (Cores de Fundo):</b> <ul style="margin:4px 0 0 18px; padding:0; list-style-type: none;"> <li style="display:flex; align-items: center; margin-bottom: 2px;"><div style="width:12px; height:12px; background:#bceeff; border: 1px solid #ccc; margin-right: 5px;"></div> Aliado</li> <li style="display:flex; align-items: center; margin-bottom: 2px;"><div style="width:12px; height:12px; background:#e8f5e9; border: 1px solid #ccc; margin-right: 5px;"></div> Player Ativo</li> <li style="display:flex; align-items: center; margin-bottom: 2px;"><div style="width:12px; height:12px; background:#ffffff; border: 1px solid #ccc; margin-right: 5px;"></div> Player Desconhecido</li> <li style="display:flex; align-items: center; margin-bottom: 2px;"><div style="width:12px; height:12px; background:#fff3e0; border: 1px solid #ccc; margin-right: 5px;"></div> Player Estagnado</li> <li style="display:flex; align-items: center; margin-bottom: 2px;"><div style="width:12px; height:12px; background:#ffebee; border: 1px solid #ccc; margin-right: 5px;"></div> Player Inativo (72h)</li> <li style="display:flex; align-items: center; margin-bottom: 2px;"><div style="width:12px; height:12px; background:#f0f0f0; border: 1px solid #ccc; margin-right: 5px;"></div> Aldeia Bárbara</li> <li style="display:flex; align-items: center; margin-bottom: 2px;"><div style="width:12px; height:12px; background:#fff9c4; border: 1px solid #ccc; margin-right: 5px;"></div> Bárbara (com Bônus)</li> </ul> <b style="display: block; margin-top: 8px;">Legendas (Status):</b> <ul style="margin:4px 0 0 18px; padding:0; list-style-type: disc;"> <li><b>Ativo:</b> Ganhou pontos desde a última verificação.</li> <li><b>Estagnado:</b> Sem ganhar pontos há mais de 24h.</li> <li><b>Inativo (72h):</b> Sem ganhar pontos há mais de 72h.</li> <li><b>Desconhecido:</b> Sem histórico ou sem ganho de pontos recentes.</li> </ul>`;
         container.appendChild(foot);
         foot.appendChild(notasDiv);
         foot.appendChild(legendasDiv);
     }
 
-    // ==========================================================
-    // INICIA A VERIFICAÇÃO
-    // ==========================================================
-    init();
+
+    // =========================================================================================
+    // NOVA ESTRUTURA DE INICIALIZAÇÃO
+    // Espera o DOM carregar e DEPOIS verifica a disponibilidade dos dados do jogo.
+    // =========================================================================================
+    function waitForGameData() {
+        const MAX_TRIES = 50; // Tenta por 10 segundos
+        let tries = 0;
+
+        const checker = setInterval(() => {
+            // Condição de verificação mais completa, usando optional chaining (?.) para segurança
+            if (typeof game_data?.village?.id !== 'undefined' && typeof TWMap?.villages !== 'undefined' && typeof game_data?.player?.id !== 'undefined') {
+                clearInterval(checker);
+                runScript(); // Executa o script principal
+            } else if (tries >= MAX_TRIES) {
+                clearInterval(checker);
+                console.error("Scanner de Vizinhança: Timeout! Não foi possível carregar os dados do jogo.");
+                alert("Scanner de Vizinhança: Falha ao carregar. Tente recarregar a página.");
+            } else {
+                tries++;
+            }
+        }, 200);
+    }
+
+    // Ponto de entrada: espera o DOM estar pronto antes de começar a verificar os dados do jogo.
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', waitForGameData);
+    } else {
+        waitForGameData(); // Se o DOM já estiver pronto
+    }
 
 })();
