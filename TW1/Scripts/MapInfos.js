@@ -2,7 +2,6 @@
     'use strict';
 
     function runScript() {
-        // ========== CONFIG ==========
         const STORAGE_KEY = "scannerVizinhosData_v3";
         const HISTORY_LIMIT = 10;
 
@@ -14,9 +13,7 @@
             heavy: 11, ram: 29, catapult: 29, knight: 10, snob: 35
         };
         const STATIC_IMAGE_BASE_URL = "https://dsbr.innogamescdn.com/asset/caf5a096/graphic/unit/recruit/";
-        // ============================
 
-        // --- utilitários ---
         function getGameData() { return game_data || {}; }
         function getTWMapVillages() { return TWMap && TWMap.villages ? TWMap.villages : null; }
         function getPlayers() { return TWMap && TWMap.players ? TWMap.players : {}; }
@@ -87,7 +84,6 @@
             return img;
         }
 
-        // ========== início ==========
         const gameData = getGameData();
         const minhaAldeia = gameData.village;
         const meuPlayerId = gameData.player.id.toString();
@@ -105,7 +101,7 @@
 
         const header = document.createElement("div");
         header.style.cssText = "display: flex; gap: 8px; align-items: center; flex-wrap: wrap;";
-        header.innerHTML = `<b>Scanner de aldeias próximas</b>`; // Raio removido
+        header.innerHTML = `<b>Scanner de aldeias próximas</b>`;
         const btnToggleGraphsGlobal = document.createElement("button");
         btnToggleGraphsGlobal.textContent = "Mostrar/Ocultar todos gráficos";
         header.appendChild(btnToggleGraphsGlobal);
@@ -136,7 +132,7 @@
         const tribeSummaryDiv = document.createElement("div");
         tribeSummaryDiv.id = "tribeSummary";
         tribeSummaryDiv.style.cssText = "margin-top: 8px; padding: 8px; border: 1px solid #eee; background-color: #fafafa;";
-        tribeSummaryDiv.innerHTML = '<b>Resumo das Tribos no Raio:</b><div style="max-height: 150px; overflow-y: auto; margin-top: 5px;">Carregando...</div>';
+        tribeSummaryDiv.innerHTML = '<b>Resumo das Tribos Próximas:</b><div style="max-height: 150px; overflow-y: auto; margin-top: 5px;">Carregando...</div>';
         container.appendChild(tribeSummaryDiv);
 
         const tabelaWrapper = document.createElement("div");
@@ -144,7 +140,6 @@
         const tabela = document.createElement("table");
         tabela.style.cssText = "width: 100%; border-collapse: collapse;";
         const stickyStylesBase = "padding:4px; border:1px solid #ddd; position: sticky; top: 0; background: #eee; z-index: 1;";
-        // Cabeçalhos sem atributos/estilos de ordenação
         tabela.innerHTML = `
             <thead>
                 <tr>
@@ -170,11 +165,9 @@
         function saveNew(obj) { localStorage.setItem(STORAGE_KEY, JSON.stringify(obj)); }
 
         function rebuild() {
-            // Processa TODAS as aldeias visíveis, ordena por distância
             const arrV = Object.values(todasVilas)
                 .map(v => extrairCoordenadas({ ...v }))
                 .map(v => ({ ...v, dist: distancia(minhaAldeia, v) }))
-                // .filter(v => v.dist <= FIXED_RADIUS) // Filtro de raio REMOVIDO
                 .sort((a, b) => a.dist - b.dist);
 
             const tbody = tabela.querySelector("tbody");
@@ -222,7 +215,7 @@
                     } else {
                         const prevData = oldData[playerId] || { history: [] };
                         const oldHistory = prevData.history;
-                        const lastEntry = oldHistory.length > 0 ? oldHistory.slice(-1)[0] : null;
+                        // const lastEntry = oldHistory.length > 0 ? oldHistory.slice(-1)[0] : null; // -> Esta linha não é mais necessária
 
                         if (oldHistory.length <= 1) {
                             status = "Desconhecido";
@@ -231,12 +224,13 @@
                             const inactiveTime = now - INACTIVE_THRESHOLD_MS;
                             const stagnantEntry = oldHistory.slice().reverse().find(e => e.ts < stagnantTime);
                             const inactiveEntry = oldHistory.slice().reverse().find(e => e.ts < inactiveTime);
+                            const oldestEntry = oldHistory[0]; 
 
                             if (inactiveEntry && pontosJogador <= inactiveEntry.p) {
                                 status = "Possivelmente inativo (72h)";
                             } else if (stagnantEntry && pontosJogador === stagnantEntry.p) {
                                 status = "Estagnado";
-                            } else if ((stagnantEntry && pontosJogador > stagnantEntry.p) || (!stagnantEntry && pontosJogador > lastEntry.p)) {
+                            } else if ((stagnantEntry && pontosJogador > stagnantEntry.p) || (!stagnantEntry && pontosJogador > oldestEntry.p)) {
                                 status = "Ativo";
                             } else {
                                 status = "Em análise";
@@ -444,7 +438,7 @@
             const tribesArray = Object.values(summaryData)
                 .sort((a, b) => b.players.size - a.players.size || b.points - a.points);
             if (tribesArray.length === 0) {
-                summaryContainer.textContent = 'Nenhuma tribo (exceto a sua) encontrada no raio.';
+                summaryContainer.textContent = 'Nenhuma tribo (exceto a sua) encontrada nas aldeias carregadas.';
                 return;
             }
             const list = document.createElement('ul');
