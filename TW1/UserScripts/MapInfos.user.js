@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Scanner de vizinhança
 // @namespace    http://tampermonkey.net/
-// @version      3.0
+// @version      3.1
 // @description  Escanear a vizinhança no tribal wars
 // @author       teudm
 // @match        https://*.tribalwars.com.br/*screen=map*
@@ -441,15 +441,23 @@
                     tdAction.style.textAlign = 'center';
                 } else {
                     const btnBaseStyle = "padding: 3px 6px; border: 1px solid #aaa; border-radius: 3px; text-decoration: none; font-size: 11px; cursor: pointer; text-align: center; display: inline-block; min-width: 70px;";
-                    const linkAttack = document.createElement("a");
-                    linkAttack.href = `/game.php?village=${minhaAldeia.id}&screen=place&target=${v.id}`;
-                    linkAttack.textContent = "Atacar/Apoiar";
+                    const buttonAttack = document.createElement("button");
+                    buttonAttack.onclick = function(e) {
+                        e.preventDefault(); 
+                        try {
+                            TWMap.actionHandlers.command.click(v.id);
+                        } catch (error) {
+                            console.error("Scanner: Erro ao abrir modal de comando via actionHandler:", error, ". Usando fallback (navegação).");
+                            window.location.href = `/game.php?village=${minhaAldeia.id}&screen=place&target=${v.id}`;
+                        }
+                    };
+                    buttonAttack.textContent = "Atacar/Apoiar";
                     if (!playerId || status === "Estagnado" || status === "Possivelmente inativo (72h)") {
-                        linkAttack.style.cssText = btnBaseStyle + "background-color: #ffebee; color: #b71c1c; border-color: #e57373; font-weight: bold;";
+                        buttonAttack.style.cssText = btnBaseStyle + "background-color: #ffebee; color: #b71c1c; border-color: #e57373; font-weight: bold;";
                     } else {
-                        linkAttack.style.cssText = btnBaseStyle + "background-color: #f5f5f5; color: #555; border-color: #ccc;";
+                        buttonAttack.style.cssText = btnBaseStyle + "background-color: #f5f5f5; color: #555; border-color: #ccc;";
                     }
-                    actionContainer.appendChild(linkAttack);
+                    actionContainer.appendChild(buttonAttack);
                     const linkCentralize = document.createElement("a");
                     linkCentralize.href = `/game.php?screen=map&x=${v.x}&y=${v.y}`;
                     linkCentralize.textContent = "Centralizar";
