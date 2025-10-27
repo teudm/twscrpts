@@ -85,6 +85,8 @@
         }
 
         const gameData = getGameData();
+        const hasFarmAssistant = gameData.features?.FarmAssistent?.active === true;
+        
         const minhaAldeia = gameData.village;
         const meuPlayerId = gameData.player.id.toString();
         const minhaTriboId = safeParseInt(gameData.player.ally);
@@ -135,6 +137,13 @@
         tribeSummaryDiv.innerHTML = '<b>Resumo das Tribos Próximas:</b><div style="max-height: 150px; overflow-y: auto; margin-top: 5px;">Carregando...</div>';
         container.appendChild(tribeSummaryDiv);
 
+        if (!hasFarmAssistant) {
+            const avisoFADiv = document.createElement("div");
+            avisoFADiv.style.cssText = "margin-top: 8px; padding: 8px; border: 1px solid #e6a800; background-color: #fff9c4; color: #7f6000; font-weight: bold; text-align: center;";
+            avisoFADiv.textContent = "Ative o Assistente de Saque para ter acesso aos botões de ataque rápido (A/B).";
+            container.appendChild(avisoFADiv);
+        }
+
         const tabelaWrapper = document.createElement("div");
         tabelaWrapper.style.cssText = "max-height: 600px; overflow-y: auto; margin-top: 8px; border-top: 1px solid #ccc; border-bottom: 1px solid #ccc;";
         const tabela = document.createElement("table");
@@ -163,6 +172,49 @@
 
         function loadOld() { try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; } catch { return {}; } }
         function saveNew(obj) { localStorage.setItem(STORAGE_KEY, JSON.stringify(obj)); }
+        function sendFarmRequest(event) {
+            const btn = event.target;
+            const targetId = btn.dataset.targetId;
+            const template = btn.textContent.toLowerCase();
+            const urlKey = `mp_farm_${template}`;
+
+            if (!targetId || !TWMap.urls.ctx[urlKey]) {
+                console.error("Scanner Vizinhança: Erro no ataque rápido.", { targetId, urlKey });
+                if (typeof UI !== 'undefined') UI.InfoMessage("Erro ao enviar ataque rápido.", 2000, "error");
+                return;
+            }
+
+            btn.disabled = true;
+            btn.textContent = "...";
+
+            const url = TWMap.urls.ctx[urlKey]
+                .replace(/__village__/, targetId)
+                .replace(/__source__/, minhaAldeia.id);
+
+            TribalWars.get(url, null, function (response) {
+                TWMap.context.ajaxDone(null, url);
+                console.log(`Ataque rápido (${template}) enviado para ${targetId}`, response);
+                
+                btn.textContent = "\u2713";
+                btn.style.backgroundColor = "#d4edda";
+                btn.style.color = "#155724";
+                btn.style.opacity = "1.0";
+                setTimeout(() => {
+                    btn.disabled = false;
+                    btn.textContent = template.toUpperCase();
+                    btn.style.backgroundColor = "#6f4e37";
+                    btn.style.color = "white";
+                    btn.style.opacity = btn.dataset.originalOpacity || "1.0"; 
+                }, 1500);
+
+            }, function () {
+                console.error(`Scanner Vizinhança: Falha ao enviar ataque rápido (${template}) para ${targetId}`);
+                if (typeof UI !== 'undefined') UI.InfoMessage("Falha ao enviar ataque rápido.", 2000, "error");                
+                btn.disabled = false;
+                btn.textContent = template.toUpperCase();
+                btn.style.opacity = btn.dataset.originalOpacity || "1.0"; 
+            }, undefined);
+        }
 
         function rebuild() {
             const arrV = Object.values(todasVilas)
@@ -215,7 +267,6 @@
                     } else {
                         const prevData = oldData[playerId] || { history: [] };
                         const oldHistory = prevData.history;
-                        // const lastEntry = oldHistory.length > 0 ? oldHistory.slice(-1)[0] : null; // -> Esta linha não é mais necessária
 
                         if (oldHistory.length <= 1) {
                             status = "Desconhecido";
@@ -224,6 +275,7 @@
                             const inactiveTime = now - INACTIVE_THRESHOLD_MS;
                             const stagnantEntry = oldHistory.slice().reverse().find(e => e.ts < stagnantTime);
                             const inactiveEntry = oldHistory.slice().reverse().find(e => e.ts < inactiveTime);
+                            
                             const oldestEntry = oldHistory[0]; 
 
                             if (inactiveEntry && pontosJogador <= inactiveEntry.p) {
@@ -259,11 +311,11 @@
 
                 if (isOwner) tr.style.backgroundColor = '#f3e5f5';
                 else if (bonusData) tr.style.backgroundColor = '#fff9c4';
-                else if (isAlly) tr.style.backgroundColor = "#e8f5e9";
+                else if (isAlly) tr.style.backgroundColor = "#e3f2fd";
                 else if (!playerId) tr.style.backgroundColor = "#f0f0f0";
                 else if (status === "Possivelmente inativo (72h)") tr.style.backgroundColor = "#ffebee";
                 else if (status === "Estagnado") tr.style.backgroundColor = "#fff3e0";
-                else if (status === "Ativo") tr.style.backgroundColor = "#e0ffe0";
+                else if (status === "Ativo") tr.style.backgroundColor = "#e8f5e9";
 
                 const tdAldeia = document.createElement("td");
                 tdAldeia.style.cssText = "padding: 4px; border: 1px solid #ddd;";
@@ -391,6 +443,43 @@
                     linkCentralize.textContent = "Centralizar";
                     linkCentralize.style.cssText = btnBaseStyle + "background-color: #e3f2fd; color: #0d47a1; border-color: #90caf9;";
                     actionContainer.appendChild(linkCentralize);
+                    if (hasFarmAssistant && !isAlly) {                        
+                        const farmLabel = document.createElement('small');
+                        farmLabel.textContent = "Ataque Rápido (AS):";
+                        farmLabel.style.cssText = "display: block; font-size: 10px; color: #666; margin-top: 5px; text-align: center;";
+                        actionContainer.appendChild(farmLabel);
+                        const quickFarmContainer = document.createElement('div');
+                        quickFarmContainer.style.cssText = "display: flex; gap: 4px;";
+                        let farmBtnStyle = btnBaseStyle.replace("display: inline-block;", "").replace("min-width: 70px;", "") +
+                                            "background-color: #6f4e37; color: white; border-color: #5a3f2d; font-weight: bold; min-width: 30px; padding: 3px; transition: opacity 0.2s ease;";
+                        let originalOpacity = "1.0";
+                        if (status === "Ativo") {
+                            originalOpacity = "0.35";
+                            farmBtnStyle += ` opacity: ${originalOpacity};`;
+                        }
+
+                        // Botão A
+                        const btnFarmA = document.createElement("button");
+                        btnFarmA.textContent = "A";
+                        btnFarmA.title = "Enviar modelo A (Assistente de Saque)";
+                        btnFarmA.style.cssText = farmBtnStyle;
+                        btnFarmA.dataset.targetId = v.id;
+                        btnFarmA.dataset.originalOpacity = originalOpacity;
+                        btnFarmA.onclick = sendFarmRequest;
+
+                        // Botão B
+                        const btnFarmB = document.createElement("button");
+                        btnFarmB.textContent = "B";
+                        btnFarmB.title = "Enviar modelo B (Assistente de Saque)";
+                        btnFarmB.style.cssText = farmBtnStyle;
+                        btnFarmB.dataset.targetId = v.id;
+                        btnFarmB.dataset.originalOpacity = originalOpacity;
+                        btnFarmB.onclick = sendFarmRequest;
+
+                        quickFarmContainer.appendChild(btnFarmA);
+                        quickFarmContainer.appendChild(btnFarmB);
+                        actionContainer.appendChild(quickFarmContainer);
+                    }
                 }
 
                 if (isAlly && !isOwner) {
@@ -507,7 +596,7 @@
         const notasDiv = document.createElement("div");
         notasDiv.innerHTML = `<b>Notas:</b> <ul style="margin:4px 0 0 18px; padding:0; list-style-type: disc;"> <li>Gráficos de pontos são carregados do <i>twstats.com</i>.</li> <li>Tempos de chegada calculados com base nas velocidades (min/campo).</li> <li>Evolução de pontos da aldeia compara com registro de ~24h atrás (ou mais antigo).</li> </ul>`;
         const legendasDiv = document.createElement("div");
-        legendasDiv.innerHTML = `<b>Legendas (Cores de Fundo):</b> <ul style="margin:4px 0 0 18px; padding:0; list-style-type: none;"> <li style="display:flex; align-items: center; margin-bottom: 2px;"><div style="width:12px; height:12px; background:#f3e5f5; border: 1px solid #ccc; margin-right: 5px;"></div> Aldeia Própria</li> <li style="display:flex; align-items: center; margin-bottom: 2px;"><div style="width:12px; height:12px; background:#e8f5e9; border: 1px solid #ccc; margin-right: 5px;"></div> Aliado</li> <li style="display:flex; align-items: center; margin-bottom: 2px;"><div style="width:12px; height:12px; background:#e0ffe0; border: 1px solid #ccc; margin-right: 5px;"></div> Player Ativo</li> <li style="display:flex; align-items: center; margin-bottom: 2px;"><div style="width:12px; height:12px; background:#ffffff; border: 1px solid #ccc; margin-right: 5px;"></div> Player Desconhecido/Em Análise</li> <li style="display:flex; align-items: center; margin-bottom: 2px;"><div style="width:12px; height:12px; background:#fff3e0; border: 1px solid #ccc; margin-right: 5px;"></div> Player Estagnado</li> <li style="display:flex; align-items: center; margin-bottom: 2px;"><div style="width:12px; height:12px; background:#ffebee; border: 1px solid #ccc; margin-right: 5px;"></div> Player Poss. Inativo (72h)</li> <li style="display:flex; align-items: center; margin-bottom: 2px;"><div style="width:12px; height:12px; background:#f0f0f0; border: 1px solid #ccc; margin-right: 5px;"></div> Aldeia Bárbara</li> <li style="display:flex; align-items: center; margin-bottom: 2px;"><div style="width:12px; height:12px; background:#fff9c4; border: 1px solid #ccc; margin-right: 5px;"></div> Bárbara (com Bônus)</li> </ul> <b style="display: block; margin-top: 8px;">Legendas (Status):</b> <ul style="margin:4px 0 0 18px; padding:0; list-style-type: disc;"> <li><b>Ativo:</b> Ganhou pontos desde a última verificação (>1h) OU nas últimas 24h.</li> <li><b>Estagnado:</b> Pontuação igual há mais de 24h.</li> <li><b>Possivelmente inativo (72h):</b> Pontuação menor ou igual há mais de 72h.</li> <li><b>Em análise:</b> Histórico existe (>1 registro), mas sem ganho recente (<24h) e sem perda significativa.</li><li><b>Desconhecido:</b> Apenas 1 registro no histórico.</li> </ul>`;
+        legendasDiv.innerHTML = `<b>Legendas (Cores de Fundo):</b> <ul style="margin:4px 0 0 18px; padding:0; list-style-type: none;"> <li style="display:flex; align-items: center; margin-bottom: 2px;"><div style="width:12px; height:12px; background:#f3e5f5; border: 1px solid #ccc; margin-right: 5px;"></div> Aldeia Própria</li> <li style="display:flex; align-items: center; margin-bottom: 2px;"><div style="width:12px; height:12px; background:#e3f2fd; border: 1px solid #ccc; margin-right: 5px;"></div> Aliado</li> <li style="display:flex; align-items: center; margin-bottom: 2px;"><div style="width:12px; height:12px; background:#e8f5e9; border: 1px solid #ccc; margin-right: 5px;"></div> Player Ativo</li> <li style="display:flex; align-items: center; margin-bottom: 2px;"><div style="width:12px; height:12px; background:#ffffff; border: 1px solid #ccc; margin-right: 5px;"></div> Player Desconhecido/Em Análise</li> <li style="display:flex; align-items: center; margin-bottom: 2px;"><div style="width:12px; height:12px; background:#fff3e0; border: 1px solid #ccc; margin-right: 5px;"></div> Player Estagnado</li> <li style="display:flex; align-items: center; margin-bottom: 2px;"><div style="width:12px; height:12px; background:#ffebee; border: 1px solid #ccc; margin-right: 5px;"></div> Player Poss. Inativo (72h)</li> <li style="display:flex; align-items: center; margin-bottom: 2px;"><div style="width:12px; height:12px; background:#f0f0f0; border: 1px solid #ccc; margin-right: 5px;"></div> Aldeia Bárbara</li> <li style="display:flex; align-items: center; margin-bottom: 2px;"><div style="width:12px; height:12px; background:#fff9c4; border: 1px solid #ccc; margin-right: 5px;"></div> Bárbara (com Bônus)</li> </ul> <b style="display: block; margin-top: 8px;">Legendas (Status):</b> <ul style="margin:4px 0 0 18px; padding:0; list-style-type: disc;"> <li><b>Ativo:</b> Ganhou pontos desde a última verificação (>1h) OU nas últimas 24h.</li> <li><b>Estagnado:</b> Pontuação igual há mais de 24h.</li> <li><b>Possivelmente inativo (72h):</b> Pontuação menor ou igual há mais de 72h.</li> <li><b>Em análise:</b> Histórico existe (>1 registro), mas sem ganho recente (<24h) e sem perda significativa.</li><li><b>Desconhecido:</b> Apenas 1 registro no histórico.</li> </ul>`;
         container.appendChild(foot);
         foot.appendChild(notasDiv);
         foot.appendChild(legendasDiv);
@@ -517,7 +606,9 @@
         const MAX_TRIES = 50;
         let tries = 0;
         const checker = setInterval(() => {
-            if (typeof game_data?.village?.id !== 'undefined' && typeof TWMap?.villages !== 'undefined' && typeof game_data?.player?.id !== 'undefined') {
+            if (typeof game_data?.village?.id !== 'undefined' && typeof TWMap?.villages !== 'undefined' && typeof game_data?.player?.id !== 'undefined'
+                && typeof game_data?.features !== 'undefined'
+            ) {
                 clearInterval(checker);
                 runScript();
             } else if (tries >= MAX_TRIES) {
