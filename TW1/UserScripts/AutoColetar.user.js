@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Auto Coletar (Loop Inteligente)
+// @name         Auto Coletar
 // @version      1.0
 // @description  Auto coletar recursos com agendamento inteligente baseado no tempo de retorno.
 // @author       Teudm
