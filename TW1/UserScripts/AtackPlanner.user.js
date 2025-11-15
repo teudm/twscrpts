@@ -113,7 +113,7 @@
         postData.x = attack.targetX;
         postData.y = attack.targetY;
 
-        const allUnits = ['spear', 'sword', 'axe', 'archer', 'spy', 'light', 'marcher', 'heavy', 'ram', 'catapult', 'knight', 'snob'];
+        const allUnits = game_data.units.filter(u => u !== 'militia');
         allUnits.forEach(unit => {
             postData[unit] = attack.units[unit] || 0;
         });
@@ -430,8 +430,7 @@
         $('#plannedAttacksList').on('click', '.delete-attack', handleDeleteAttack);
         $('#plannedAttacksList').on('click', '.copy-attack', handleCopyAttack);
     }
-
-    function handleAddAttack(e) {
+function handleAddAttack(e) {
         e.preventDefault();
 
         const targetX = $('#plannerX').val();
@@ -458,12 +457,14 @@
             alert('O horário de saída deve ser no futuro. Por favor, insira um horário válido.');
             return;
         }
+
         const newAttackTime = departureDate.getTime();
         const attacks = getAttacksFromStorage();
         const sameTargetAttacks = attacks.filter(a => a.targetX === targetX && a.targetY === targetY);
+        
         if (sameTargetAttacks.length > 0) {
             const maxTime = Math.max(...sameTargetAttacks.map(a => new Date(a.departureTime).getTime()));
-            if (newAttackTime < (maxTime + MIN_ATTACK_INTERVAL_MS)) {
+            if (newAttackTime >= maxTime && newAttackTime < (maxTime + MIN_ATTACK_INTERVAL_MS)) {
                 const adjustedTime = maxTime + MIN_ATTACK_INTERVAL_MS;
                 departureDate.setTime(adjustedTime); 
                 alert(`Ajuste Automático: O tempo de envio foi ajustado para ${departureDate.toLocaleString('pt-BR', { timeStyle: 'medium' })}.${String(departureDate.getMilliseconds()).padStart(3, '0')} para manter o intervalo mínimo de ${MIN_ATTACK_INTERVAL_MS}ms.`);
