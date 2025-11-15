@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Planejador de Ataques (v11.0 - Layout Nativo)
-// @version      1.0
+// @version      1.1
 // @description  Agenda ataques POST, UI idêntica à praça, cópia, ajuste 200ms, coloração, e cache 24h.
 // @author       TeudM
 // @match        https://*.tribalwars.com.br/game.php?*screen=place*
