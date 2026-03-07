@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Command Planner
-// @version      3.0
+// @version      3.1
 // @description  Planeje por horários de CHEGADA. Calcula tempo de viagem automaticamente baseado nas tropas e configurações do mundo.
 // @author       TeudM
 // @match        https://*.tribalwars.com.br/game.php?*screen=place*
@@ -18,7 +18,8 @@
     const STORAGE_KEY_PREFIX = 'TW_AttackPlanner_POST_';
     const currentVillageID = game_data.village.id;
     const STORAGE_KEY = `${STORAGE_KEY_PREFIX}${currentVillageID}`;
-    const MIN_ATTACK_INTERVAL_MS = 200;
+    const MIN_ATTACK_INTERVAL_MS = 100;
+    const PRE_FETCH_MS = 8000; // Tempo em MS para preparar o ataque antes do envio final
 
     const VILLAGE_CACHE_KEY = 'TW_VILLAGE_DATA_CACHE';
     const PLAYER_CACHE_KEY = 'TW_PLAYER_DATA_CACHE';
@@ -88,11 +89,10 @@
             if (attack.originID !== currentVillageID) continue;
             if (pendingTimers[attack.id]) continue;
 
-            // attack.departureTime já considera o offset salvo
             const dueTime = new Date(attack.departureTime).getTime();
             const msRemaining = dueTime - serverTimeMs;
 
-            // Se passou do tempo (até 1s de atraso aceitável para disparo imediato)
+            // Se passou do tempo de disparo e não foi pego no pre-fetch
             if (msRemaining < -1000) {
                 console.log(`[PLANEJADOR] Atrasado. Disparando ${attack.id}.`);
                 pendingTimers[attack.id] = true;
@@ -100,9 +100,11 @@
                 break; 
             }
 
-            // Se faltam menos de 20s, agenda o setTimeout preciso
+            // Se faltam menos de 20s, agenda o preparo do ataque
             if (msRemaining > 0 && msRemaining < 20000) {
-                const timerId = setTimeout(() => triggerAttack(attack), msRemaining);
+                // Calcula o momento de iniciar o pre-fetch (preparação antecipada)
+                const preFetchDelay = Math.max(0, msRemaining - PRE_FETCH_MS);
+                const timerId = setTimeout(() => triggerAttack(attack), preFetchDelay);
                 pendingTimers[attack.id] = timerId;
             }
         }
@@ -126,15 +128,19 @@
 
         if (attack.commandType === 'support') postData.support = "Apoio"; else postData.attack = "Ataque"; 
 
+        // Envia a primeira etapa de forma antecipada
         $.post(postURL, postData)
             .done(function(html) {
-                if (typeof html === 'string' && html.includes('command-data-form')) sendAttackPOST_Step2(html, attack);
-                else delete pendingTimers[attack.id];
+                if (typeof html === 'string' && html.includes('command-data-form')) {
+                    scheduleFinalAttackExecution(html, attack);
+                } else {
+                    delete pendingTimers[attack.id];
+                }
             })
             .fail(function() { delete pendingTimers[attack.id]; });
     }
 
-    function sendAttackPOST_Step2(html, originalAttack) {
+    function scheduleFinalAttackExecution(html, originalAttack) {
         try {
             const $resp = $(html);
             const $form = $resp.find('#command-data-form');
@@ -149,16 +155,24 @@
             if (!$btn.length) $btn = $form.find('input[type=submit][name="submit"]');
             if ($btn.length) data[$btn.attr('name')] = $btn.val();
 
-            $.post(url, data)
-                .done(function(final) {
-                    if (final.redirect || (typeof final === 'string' && final.includes('screen=overview"'))) {
-                         removeAttackFromStorage(originalAttack.id);
-                         renderAttackList(); 
-                         delete pendingTimers[originalAttack.id];
-                         checkSafeToReload(); 
-                    } else delete pendingTimers[originalAttack.id];
-                })
-                .fail(function() { delete pendingTimers[originalAttack.id]; });
+            // Calcula o tempo EXATO restante até a saída real planejada
+            const dueTime = new Date(originalAttack.departureTime).getTime();
+            const currentServerTimeMs = (parseServerTime() || new Date()).getTime();
+            const waitTime = Math.max(0, dueTime - currentServerTimeMs);
+
+            // Aguarda o tempo calculado e envia apenas a confirmação final
+            setTimeout(() => {
+                $.post(url, data)
+                    .done(function(final) {
+                        if (final.redirect || (typeof final === 'string' && final.includes('screen=overview"'))) {
+                             removeAttackFromStorage(originalAttack.id);
+                             renderAttackList(); 
+                             delete pendingTimers[originalAttack.id];
+                             checkSafeToReload(); 
+                        } else delete pendingTimers[originalAttack.id];
+                    })
+                    .fail(function() { delete pendingTimers[originalAttack.id]; });
+            }, waitTime);
 
         } catch (e) { delete pendingTimers[originalAttack.id]; }
     }
@@ -296,7 +310,7 @@
             <div id="planner-container" style="margin-top: 20px;">
                 <hr>
                 <div id="planner-data-status"></div>
-                <h3>Planejador v3.0</h3>
+                <h3>Planejador v3.1</h3>
                 <form id="addAttackPOSTForm">
                     <table class="vis" style="width: 100%;">
                         <tr>
@@ -332,7 +346,11 @@
                         </tr>
                         <tr>
                             <td>Opções:</td>
-                            <td><label><input type="checkbox" id="plannerFake" /> Marcar como FAKE</label></td>
+                            <td>
+                                <label><input type="checkbox" id="plannerFake" /> Marcar como FAKE</label>
+                                <span style="margin-left: 15px; font-weight:bold;">Qtd (NT): </span>
+                                <input type="number" id="plannerCount" size="3" min="1" max="50" value="1" style="width: 50px;" title="Agendar múltiplas vezes seguidas" />
+                            </td>
                         </tr>
                     </table>
                     <table style="width: 100%; margin-top: 5px;"><tbody><tr>
@@ -465,36 +483,54 @@
         const units = {};
         $('.unit-input').each(function() { if($(this).val()>0) units[$(this).attr('name')] = parseInt($(this).val()); });
 
-        // Ajuste de Colisão (200ms)
-        let depDate = new Date(calculatedRealDeparture);
+        const repeatCount = parseInt($('#plannerCount').val()) || 1;
         const attacks = getAttacksFromStorage();
-        const existing = attacks.filter(a => a.targetX == tx && a.targetY == ty && a.commandType === type);
-        if (existing.length) {
-            const max = Math.max(...existing.map(a => new Date(a.departureTime).getTime()));
-            if (depDate.getTime() >= max && depDate.getTime() < (max + MIN_ATTACK_INTERVAL_MS)) {
-                depDate.setTime(max + MIN_ATTACK_INTERVAL_MS);
-                alert('Ajuste colisão (+200ms).');
+        const offsetUsed = parseInt($('#plannerOffset').val() || 0);
+        const isFake = $('#plannerFake').is(':checked');
+
+        let lastScheduledTime = calculatedRealDeparture.getTime() - MIN_ATTACK_INTERVAL_MS;
+
+        for (let i = 0; i < repeatCount; i++) {
+            let depDate = new Date(calculatedRealDeparture.getTime() + (i * MIN_ATTACK_INTERVAL_MS));
+
+            const existing = attacks.filter(a => a.targetX == tx && a.targetY == ty && a.commandType === type);
+            if (existing.length) {
+                const max = Math.max(...existing.map(a => new Date(a.departureTime).getTime()));
+                // Se colidir com outro existente no DB
+                if (depDate.getTime() < max + MIN_ATTACK_INTERVAL_MS) {
+                    depDate.setTime(max + MIN_ATTACK_INTERVAL_MS);
+                    if (i === 0) alert('Ajuste de colisão aplicado.');
+                }
             }
+
+            // Garante que o gap interno da sequência do loop seja respeitado rigidamente
+            if (depDate.getTime() < lastScheduledTime + MIN_ATTACK_INTERVAL_MS) {
+                depDate.setTime(lastScheduledTime + MIN_ATTACK_INTERVAL_MS);
+            }
+
+            lastScheduledTime = depDate.getTime();
+
+            const newAtt = {
+                id: Date.now() + i, // o +i previne IDs duplicados num mesmo ms
+                originID: currentVillageID,
+                departureTime: depDate.toISOString(),
+                targetX: tx, targetY: ty, units: {...units}, // clone do objeto de unidades
+                isFake: isFake,
+                villageName: villageInfo ? villageInfo.name : 'Desconhecido',
+                ownerName: villageInfo ? (playerDataMap.get(villageInfo.playerId)?.name || '?') : '?',
+                commandType: type,
+                offsetUsed: offsetUsed
+            };
+
+            attacks.push(newAtt);
         }
 
-        const newAtt = {
-            id: Date.now(),
-            originID: currentVillageID,
-            departureTime: depDate.toISOString(),
-            targetX: tx, targetY: ty, units: units,
-            isFake: $('#plannerFake').is(':checked'),
-            villageName: villageInfo ? villageInfo.name : 'Desconhecido',
-            ownerName: villageInfo ? (playerDataMap.get(villageInfo.playerId)?.name || '?') : '?',
-            commandType: type,
-            offsetUsed: parseInt($('#plannerOffset').val() || 0) // Salva o offset usado pra referencia futura se precisar
-        };
-
-        attacks.push(newAtt);
         attacks.sort((a, b) => new Date(a.departureTime) - new Date(b.departureTime));
         saveAttacksToStorage(attacks);
         renderAttackList();
         
         $('#plannerCoords').val(''); $('#plannerArrival').val(''); $('#plannerMS').val('0');
+        $('#plannerCount').val('1');
         $('.unit-input').val(''); $('#targetInfoDisplay').text('Aguardando coordenadas...'); resetCalcDisplay();
     }
 
@@ -507,7 +543,7 @@
         $('#addAttackPOSTForm .unit-input').val('');
         for(const u in a.units) $(`#addAttackPOSTForm .unit-input[name="${u}"]`).val(a.units[u]);
         $('#plannerFake').prop('checked', a.isFake||false);
-        if(a.offsetUsed) $('#plannerOffset').val(a.offsetUsed); // Recupera o offset usado naquele ataque
+        if(a.offsetUsed) $('#plannerOffset').val(a.offsetUsed); 
         recalculateLogistics();
         document.getElementById('planner-container').scrollIntoView({behavior:'smooth'});
     }
@@ -526,8 +562,6 @@
                 const slowest = getSlowestUnit(units);
                 let arrStr = "---";
                 if(slowest) {
-                    // Recalcula chegada para mostrar (baseada na saida real + offset reverso + viagem)
-                    // Simples: Saída Real + Tempo Viagem
                     const res = calculateTravelTime(game_data.village.x, game_data.village.y, a.targetX, a.targetY, slowest);
                     arrStr = new Date(dep.getTime() + res.durationMs).toLocaleString('pt-BR', {timeStyle:'medium'});
                 }
